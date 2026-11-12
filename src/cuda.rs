@@ -134,13 +134,6 @@ impl Assigner for CudaAssigner {
         Ok(())
     }
 
-    fn set_bias(&mut self, bias: &[f32]) -> Result<()> {
-        assert_eq!(bias.len(), self.k);
-        self.norms_host.iter_mut().zip(bias).for_each(|(n, b)| *n += b);
-        self.stream.memcpy_htod(&self.norms_host, self.cnorm.as_mut().unwrap())?;
-        Ok(())
-    }
-
     fn name(&self) -> String {
         format!(
             "CUDA FP32 (cuBLAS sgemm + argmin), {}, {} rows per chunk",

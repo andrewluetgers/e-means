@@ -1,0 +1,18 @@
+[package]
+name = "emeans"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "e-means clustering (Bessa et al., arXiv:2611.09501): AVX-512/AVX2 CPU and CUDA backends"
+
+[dependencies]
+rayon = "1"
+cudarc = { version = "0.19", optional = true, default-features = false, features = ["std", "driver", "cublas", "nvrtc", "dynamic-loading", "cuda-version-from-build-system", "fallback-latest"] }
+
+[features]
+cuda = ["dep:cudarc"]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1

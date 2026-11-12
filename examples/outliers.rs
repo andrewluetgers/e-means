@@ -1,7 +1,7 @@
 //! Cluster a raw f32 file, then report clusters, families and outliers.
 //!
 //!   cargo run --release --example outliers -- vectors.f32 <d> <k> [--epochs 5]
-//!       [--balance 0] [--top 1000] [--family-radius 1.25] [--prefix out]
+//!       [--top 1000] [--family-radius 1.25] [--prefix out]
 //!
 //! Writes <prefix>.clusters.tsv (one row per cluster) and <prefix>.outliers.tsv
 //! (the top-scoring rows) and <prefix>.labels.u32 (each row's cluster), and
@@ -21,7 +21,7 @@ fn main() -> std::io::Result<()> {
     let x: Vec<f32> = bytes.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
     let n = x.len() / d;
 
-    let cfg = Config { nepochs: num("--epochs", 5.0), balance: num("--balance", 0.0) as f32, ..Default::default() };
+    let cfg = Config { nepochs: num("--epochs", 5.0), ..Default::default() };
     let out = emeans::train_cpu(&x, d, k, &cfg).expect("training failed");
     let (labels, sq) = emeans::assign(&x, &out.centroids, d, &mut CpuAssigner::new()).expect("assign failed");
     let rcfg = report::ReportConfig { family_radius: num("--family-radius", 1.25) as f32, ..Default::default() };

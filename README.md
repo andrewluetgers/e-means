@@ -100,34 +100,6 @@ The MSE differences are within seed-to-seed variation. The integer search is
 about 2x faster at 512-D and gives nothing at 64-D, where the search is no
 longer the dominant cost.
 
-## Balance penalty (experimental)
-
-`Config { balance: lambda, .. }` makes training assign each row to the centroid
-minimizing `|x - c_j|^2 + lambda * s * N_j / mean(N)` (`N_j`: the cluster's
-running mass, `s`: current mean squared distance). 0 is plain e-means.
-`cargo run --release --example balance -- vectors.f32 <d> <k>` sweeps lambda on
-your data and prints MSE against balance.
-
-Imbalance factor is `k * sum n_j^2 / n^2` (1.0 = equal sizes), measured after
-re-assigning every row to its plain nearest centroid. 200,000 rows, k = 1024,
-5 epochs, mean of 5 seeds, synthetic data:
-
-| lambda | Smooth 64-D: MSE | imbalance | max/mean | Blob mixture 96-D: MSE | imbalance | max/mean |
-|---|---|---|---|---|---|---|
-| 0 | baseline | 1.08 | 1.8 | baseline | 1.56 | 5.1 |
-| 0.03 | -0.01% | 1.05 | 1.5 | +5.3% | 1.46 | 3.8 |
-| 0.1 | +0.03% | 1.03 | 1.4 | +4.1% | 1.34 | 4.0 |
-| 0.3 | +0.33% | 1.02 | 1.3 | +0.9% | 1.38 | 4.0 |
-| 1.0 | +1.32% | 1.01 | 1.4 | -1.5% | 1.45 | 7.5 |
-| 3.0 | +3.24% | 1.05 | 1.7 | +4.9% | 1.42 | 7.5 |
-
-On smooth, embedding-like data the trade-off is clean and lambda around
-0.1-0.3 is nearly free. On the blob mixture (4096 discrete blobs, k = 1024) the
-effect is erratic: the penalty interferes with dead-cluster revival there
-(about half as many revivals), and with revival switched off it behaves
-monotonically. Treat it as experimental and sweep on real data before use.
-Above lambda = 1 it starts emptying clusters.
-
 ## Cluster report and outliers
 
 `emeans::report::report(&labels, &sqdist, &centroids, d, &cfg)` takes what
@@ -143,17 +115,18 @@ Above lambda = 1 it starts emptying clusters.
 
 `report.top_outliers(n)` ranks rows by the larger of the two z-scores.
 Per-cluster `p99` and `max` are covering radii, usable for list pruning in an
-IVF index. `cargo run --release --example outliers -- vectors.f32 <d> <k>`
+IVF index. `emeans::balance_stats(&labels, k)` gives the imbalance factor
+(`k * sum n_j^2 / n^2`, 1.0 = equal sizes). `cargo run --release --example outliers -- vectors.f32 <d> <k>`
 prints a summary and writes per-cluster and per-outlier TSV files.
 
 Check on synthetic data (200,000 heavy-tailed 64-D rows, k = 1024) with 200
 scattered off-distribution rows and one 40-row rare tight group planted:
 
-| | Plain | balance 0.3 |
-|---|---|---|
-| Scattered rows in the top 240 scores (0.12%) | 151 / 200 | 132 / 200 |
-| Scattered rows in the top 1200 scores (0.6%) | 200 / 200 | 200 / 200 |
-| Rare group | own cluster, the most isolated (6.4x) | own cluster, the most isolated (6.7x) |
+| | Result |
+|---|---|
+| Scattered rows in the top 240 scores (0.12%) | 151 / 200 |
+| Scattered rows in the top 1200 scores (0.6%) | 200 / 200 |
+| Rare group | own cluster, the most isolated (6.4x) |
 
 The rare group is found at cluster level, not by point scores: its rows sit
 close to their own centroid. Family radius and score thresholds are heuristics

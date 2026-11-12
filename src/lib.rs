@@ -75,10 +75,6 @@ impl Scalar for u8 {
 pub trait Assigner {
     /// Load a `k x d` row-major centroid table for the following `assign` calls.
     fn set_centroids(&mut self, centroids: &[f32], k: usize, d: usize) -> Result<()>;
-    /// Add `bias[j]` to centroid j's score for the following `assign` calls:
-    /// rows then go to the centroid minimizing `|x - c_j|^2 + bias[j]`, and the
-    /// returned distance includes that bias. Reset by `set_centroids`.
-    fn set_bias(&mut self, bias: &[f32]) -> Result<()>;
     /// Human-readable description of the kernel in use.
     fn name(&self) -> String;
 }
@@ -111,14 +107,6 @@ pub struct Config {
     pub alpha0: Option<f64>,
     /// Revival threshold tau. `None`: 0.1, or 0 (off) for `d <= 2`.
     pub unused_threshold: Option<f32>,
-    /// Cluster-size balance penalty lambda (0 = off, plain e-means). During
-    /// training a row goes to the centroid minimizing
-    /// `|x - c_j|^2 + lambda * s * N_j / mean(N)`, where `N_j` is the cluster's
-    /// running mass and `s` the current mean squared distance, so lambda is
-    /// dimensionless: at 1.0 a cluster twice the mean size costs one typical
-    /// squared distance more than an average one. This is the per-point form
-    /// of adding `lambda * s * k/n * sum_j n_j^2` to the objective.
-    pub balance: f32,
     pub seed: u64,
     pub verbose: bool,
 }
@@ -131,7 +119,6 @@ impl Default for Config {
             batch_size: None,
             alpha0: None,
             unused_threshold: None,
-            balance: 0.0,
             seed: 1234,
             verbose: false,
         }
@@ -392,8 +379,6 @@ pub fn train<T: Scalar, A: AssignRows<T>>(x: &[T], d: usize, k: usize, cfg: &Con
     let mut objective = Vec::new();
     let mut pass_counts = vec![0u64; k];
     let mut pass_sums: Vec<f32> = Vec::new();
-    let mut bias = vec![0f32; if cfg.balance > 0.0 { k } else { 0 }];
-    let mut mean_sqdist = 0f64; // s: mean squared distance of the previous batch
     let mut step = 0usize;
     let last = recipe.epoch_rows.len() - 1;
 
@@ -408,26 +393,12 @@ pub fn train<T: Scalar, A: AssignRows<T>>(x: &[T], d: usize, k: usize, cfg: &Con
         for ids in order[..epoch_n].chunks(batch) {
             // One batch: assign every row against a fixed centroid snapshot.
             assigner.set_centroids(&st.centroids, k, d)?;
-            let penalized = cfg.balance > 0.0 && mean_sqdist > 0.0;
-            if penalized {
-                let mean_mass = st.usage.iter().map(|&u| u as f64).sum::<f64>() / k as f64;
-                let scale = (cfg.balance as f64 * mean_sqdist / mean_mass) as f32;
-                bias.iter_mut().zip(&st.usage).for_each(|(b, &u)| *b = scale * u);
-                assigner.set_bias(&bias)?;
-            }
-            let mut batch_obj = 0f64;
             for part in ids.chunks(chunk) {
                 let m = part.len();
                 for (row, &i) in rows.chunks_exact_mut(d).zip(part) {
                     row.copy_from_slice(&x[i as usize * d..(i as usize + 1) * d]);
                 }
                 assigner.assign(&rows[..m * d], &mut chunk_labels[..m], &mut chunk_dist[..m])?;
-                if penalized {
-                    // Report true squared distances, without the penalty.
-                    for (v, &l) in chunk_dist[..m].iter_mut().zip(&chunk_labels[..m]) {
-                        *v = (*v - bias[l as usize]).max(0.0);
-                    }
-                }
                 for ((row, &l), &i) in rows.chunks_exact(d).zip(&chunk_labels[..m]).zip(part) {
                     let l = l as usize;
                     if counts[l] == 0 {
@@ -439,10 +410,8 @@ pub fn train<T: Scalar, A: AssignRows<T>>(x: &[T], d: usize, k: usize, cfg: &Con
                         labels[i as usize] = l as u32;
                     }
                 }
-                batch_obj += chunk_dist[..m].iter().map(|&v| v as f64).sum::<f64>();
+                epoch_obj += chunk_dist[..m].iter().map(|&v| v as f64).sum::<f64>();
             }
-            epoch_obj += batch_obj;
-            mean_sqdist = batch_obj / ids.len() as f64;
             if is_last {
                 // Kept for the closing mean, before the EMA consumes them.
                 for &j in &touched {

@@ -92,12 +92,6 @@ impl Assigner for CpuAssigner {
         Ok(())
     }
 
-    fn set_bias(&mut self, bias: &[f32]) -> Result<()> {
-        assert_eq!(bias.len(), self.k);
-        self.norms.iter_mut().zip(bias).for_each(|(n, b)| *n += b);
-        Ok(())
-    }
-
     fn name(&self) -> String {
         format!("CPU {:?}, {} threads", self.simd, rayon::current_num_threads())
     }

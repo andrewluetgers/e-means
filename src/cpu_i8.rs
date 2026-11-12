@@ -39,8 +39,7 @@ pub struct CpuI8Assigner {
     shift: u32,     // centroids are stored as round(c * 2^shift)
     c8: Vec<i8>,    // I8 mode
     c16: Vec<i16>,  // I16 mode
-    /// Per centroid: `|c_q|^2` (plus the `vpdpbusd` offset correction and any
-    /// balance bias), so that `score = offset - mult * dot` ranks by distance.
+    /// Per centroid: `|c_q|^2` (plus the `vpdpbusd` offset correction), so that `score = offset - mult * dot` ranks by distance.
     offset: Vec<i64>,
     mult: i64,
 }
@@ -106,13 +105,6 @@ impl Assigner for CpuI8Assigner {
                 self.mult = 2 << self.shift;
             }
         }
-        Ok(())
-    }
-
-    fn set_bias(&mut self, bias: &[f32]) -> Result<()> {
-        assert_eq!(bias.len(), self.k);
-        let unit = (1u64 << (2 * self.shift)) as f64; // score units per squared distance
-        self.offset.iter_mut().zip(bias).for_each(|(o, &b)| *o += (b as f64 * unit).round() as i64);
         Ok(())
     }
 
